@@ -1,7 +1,6 @@
 import sys
-from flask import Flask, request, make_response, jsonify
+from flask import Flask, jsonify, abort, request
 from flask_restful import Resource, Api, reqparse, inputs
-from flask.views import MethodView
 from flask_sqlalchemy import SQLAlchemy
 import datetime
 
@@ -33,22 +32,24 @@ class Event(db.Model):
     event = db.Column(db.String(200), nullable=False)
     date = db.Column(db.Date, nullable=False)
 
+    def to_json(self):
+        return {"id": self.id, "event": self.event, "date": str(self.date)}
+
 
 db.create_all()
 
 
-@app.route('/')
-def index():
-    response = make_response('<h1>The Main Page, OK?</h1>')
-    return response
-
-
-class HelloWorldResource(Resource):
+class EventAddList(Resource):
     def get(self):
+        start = request.args.get('start_time')
+        end = request.args.get('end_time')
         events = Event.query.all()
-        events = [{"id": event.id, "event": event.event, "date": str(event.date)} for event in events]
+        if start is not None:
+            events = [event for event in events if str(event.date) >= start]
+        if end is not None:
+            events = [event for event in events if str(event.date) <= end]
+        events = [event.to_json() for event in events]
         return jsonify(events)
-
 
     def post(self):
         args = parser.parse_args()
@@ -61,15 +62,32 @@ class HelloWorldResource(Resource):
                 }
 
 
-class EventsResponse(Resource):
+class EventsTodayResponse(Resource):
     def get(self):
         events = Event.query.filter(Event.date == datetime.date.today()).all()
-        events = [{"id": event.id, "event": event.event, "date": str(event.date)} for event in events]
+        events = [event.to_json() for event in events]
         return jsonify(events)
 
 
-api.add_resource(HelloWorldResource, '/event/')
-api.add_resource(EventsResponse, '/event/today')
+class EventGetDelete(Resource):
+    def get(self, event_id):
+        event = Event.query.filter(Event.id == event_id).first()
+        if event is None:
+            abort(404, "The event doesn't exist!")
+        return event.to_json()
+
+    def delete(self, event_id):
+        event = Event.query.filter(Event.id == event_id).first()
+        if event is None:
+            abort(404, "The event doesn't exist!")
+        db.session.delete(event)
+        db.session.commit()
+        return {"message": "The event has been deleted!"}
+
+
+api.add_resource(EventGetDelete, '/event/<int:event_id>')
+api.add_resource(EventAddList, '/event/')
+api.add_resource(EventsTodayResponse, '/event/today')
 
 
 if __name__ == '__main__':
